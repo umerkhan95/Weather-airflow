@@ -1,10 +1,8 @@
 """
 Weather ETL DAG
 --------------
-This DAG fetches weather data from OpenWeatherMap API at 10-minute intervals 
-for 8 hours, starting from the current date, and stores it in text and CSV files,
-then uploads the CSV to Google Drive.
-
+This DAG fetches weather data from OpenWeatherMap API every 8 hours daily, 
+stores it in text and CSV files, then uploads the CSV to Google Drive.
 Best practices implemented:
 - Environment variables for sensitive data
 - Comprehensive error handling
@@ -43,17 +41,18 @@ default_args = {
 dag = DAG(
     'Weather_Data_Collection',
     default_args=default_args,
-    description='A DAG to collect weather data every 10 minutes for 8 hours',
-    schedule_interval=timedelta(days=1),
+    description='A DAG to collect weather data every 8 hours daily',
+    schedule_interval=timedelta(hours=8),
     catchup=False
 )
 
 def print_task_info(context):
     """Print information about the current task execution."""
     print("Task instance is in running state")
-    print(f" Previous state of the Task instance: {context.get('task_instance').previous_state}")
-    print(f"Current task name:{context.get('task').task_id} state:{context.get('task_instance').state} start_date:{context.get('task_instance').start_date}")
-    print(f"Dag name:{context.get('dag').dag_id} and current dag run status:{context.get('dag_run').state}")
+    print(f"Current task name: {context.get('task').task_id}")
+    print(f"Start date: {context.get('task_instance').start_date}")
+    print(f"DAG name: {context.get('dag').dag_id}")
+    print(f"DAG run ID: {context.get('dag_run').run_id}")
 
 def get_weather_data(timestamp):
     """Extract weather data from OpenWeatherMap API."""
@@ -98,36 +97,27 @@ def get_weather_data(timestamp):
         return None
 
 def extract_data(**context):
-    """Extract weather data at regular intervals."""
+    """Extract current weather data."""
     print_task_info(context)
     print("Starting weather data extraction...")
     
-    # In a real DAG, we would only collect one data point at the current time
-    # but for testing/simulation, we'll generate data points for the whole 8 hours
+    # Just collect one data point at the current time
+    current_time = datetime.now()
+    print(f"Fetching data for {current_time}...")
+    
+    # Get weather data for current timestamp
+    weather_data = get_weather_data(current_time)
+    
     weather_data_points = []
-    start_time = datetime.now()
-    total_intervals = 48  # 8 hours with 10-minute intervals
-    interval_minutes = 10
-    
-    for i in range(total_intervals):
-        # Simulate different timestamps
-        current_time = start_time + timedelta(minutes=i * interval_minutes)
-        print(f"Fetching data for {current_time}...")
-        
-        # Get weather data for this timestamp
-        weather_data = get_weather_data(current_time)
-        
-        if weather_data:
-            weather_data_points.append(weather_data)
-            print(f"Successfully fetched data for {current_time}")
-        else:
-            print(f"Failed to fetch data for {current_time}")
-    
-    # For testing, if no data points were collected, create a sample one
-    if not weather_data_points:
-        print("No data collected, creating a sample data point for testing...")
+    if weather_data:
+        weather_data_points.append(weather_data)
+        print(f"Successfully fetched data for {current_time}")
+    else:
+        print(f"Failed to fetch data for {current_time}")
+        # Create a sample data point for testing if API call fails
+        print("Creating a sample data point due to API failure...")
         sample_data = {
-            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "timestamp": current_time.strftime("%Y-%m-%d %H:%M:%S"),
             "temperature_kelvin": 300.15,
             "pressure": 1015,
             "humidity": 70,
@@ -137,7 +127,7 @@ def extract_data(**context):
         }
         weather_data_points.append(sample_data)
     
-    print(f"Extracted {len(weather_data_points)} data points out of {total_intervals} intervals")
+    print(f"Extracted {len(weather_data_points)} data point")
     context['ti'].xcom_push(key='raw_weather_data', value=weather_data_points)
 
 def transform_data(**context):
@@ -166,8 +156,7 @@ def transform_data(**context):
         transformed_data = {
             "city": "Karachi",
             "collection_date": datetime.now().strftime("%Y-%m-%d"),
-            "interval_minutes": 10,
-            "total_hours": len(raw_data) * 10 / 60,
+            "collection_interval": "Every 8 hours",
             "data_points": len(raw_data),
             "measurements": []
         }
@@ -206,8 +195,7 @@ def save_to_file(**context):
             transformed_data = {
                 "city": "Karachi",
                 "collection_date": datetime.now().strftime("%Y-%m-%d"),
-                "interval_minutes": 10,
-                "total_hours": 0.17,
+                "collection_interval": "Every 8 hours",
                 "data_points": 1,
                 "measurements": [{
                     "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
@@ -221,7 +209,9 @@ def save_to_file(**context):
             }
         
         # Create output directory if it doesn't exist
-        output_dir = Path("/Users/umerkhan/airflow/weather_data")
+        # Using the project path for better portability
+        project_dir = Path("/Users/umerkhan/code/ory/fun_projects/weatherApp_airflow")
+        output_dir = project_dir / "weather_data"
         output_dir.mkdir(exist_ok=True)
         
         # Format timestamp for filename
@@ -233,7 +223,7 @@ def save_to_file(**context):
         with open(txt_file, 'w') as f:
             f.write(f"Weather Data for {transformed_data['city']}\n")
             f.write(f"Collection Date: {transformed_data['collection_date']}\n")
-            f.write(f"Interval: {transformed_data['interval_minutes']} minutes over {transformed_data['total_hours']} hours\n")
+            f.write(f"Collection Interval: {transformed_data['collection_interval']}\n")
             f.write(f"Total Data Points: {transformed_data['data_points']}\n\n")
             
             f.write("Measurements:\n")
@@ -276,7 +266,8 @@ def upload_to_google_drive(**context):
     # For testing, if no path is pulled from XCOM, create a sample file
     if not csv_file_path:
         print("No CSV file path found, using sample data for testing...")
-        output_dir = Path("/Users/umerkhan/airflow/weather_data")
+        project_dir = Path("/Users/umerkhan/code/ory/fun_projects/weatherApp_airflow")
+        output_dir = project_dir / "weather_data"
         output_dir.mkdir(exist_ok=True)
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         csv_file_path = str(output_dir / f"sample_weather_data_{timestamp}.csv")
@@ -294,13 +285,25 @@ def upload_to_google_drive(**context):
         sample_df.to_csv(csv_file_path, index=False)
         print(f"Created sample CSV file: {csv_file_path}")
     
-    # Path to the service account credentials JSON file
-    SERVICE_ACCOUNT_FILE = '/Users/umerkhan/code/ory/fun_projects/weatherApp_airflow/murtuza-weather-1688bc99d8e1.json'
+    # Path to the service account credentials JSON file - use project directory for better portability
+    project_dir = Path("/Users/umerkhan/code/ory/fun_projects/weatherApp_airflow")
+    SERVICE_ACCOUNT_FILE = str(project_dir / "murtuza-weather-1688bc99d8e1.json")
     
     # Define the scopes for Google Drive API
     SCOPES = ['https://www.googleapis.com/auth/drive']
     
     try:
+        # Check if credentials file exists
+        if not os.path.exists(SERVICE_ACCOUNT_FILE):
+            print(f"Service account file not found at: {SERVICE_ACCOUNT_FILE}")
+            print("Searching for credentials file...")
+            
+            # Try to find the file in the credentials directory
+            alt_path = project_dir / "credentials" / "murtuza-weather-1688bc99d8e1.json"
+            if os.path.exists(alt_path):
+                SERVICE_ACCOUNT_FILE = str(alt_path)
+                print(f"Found credentials at: {SERVICE_ACCOUNT_FILE}")
+
         # Authenticate using service account
         credentials = service_account.Credentials.from_service_account_file(
             SERVICE_ACCOUNT_FILE, scopes=SCOPES)

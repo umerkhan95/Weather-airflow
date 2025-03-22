@@ -1,0 +1,14 @@
+Weather Data for Karachi
+Collection Date: 2025-03-22
+Collection Interval: Every 8 hours
+Total Data Points: 1
+
+Measurements:
+================================================================================
+Time: 2025-03-22 16:44:18
+Temperature: 26.9°C
+Pressure: 1014 hPa
+Humidity: 54%
+Description: clear sky
+Wind Speed: 3.09 m/s
+----------------------------------------
